@@ -78,13 +78,21 @@ router.post('/login', (req, res) => {
 
 // PUT /api/profile
 router.put('/profile', requireAuth, (req, res) => {
-  const { displayName } = req.body;
+  const { displayName, publicKey } = req.body;
 
-  if (!displayName || typeof displayName !== 'string' || displayName.trim().length < 1 || displayName.trim().length > 30) {
-    return res.status(400).json({ error: 'Display name must be 1-30 characters' });
+  if (displayName !== undefined) {
+    if (typeof displayName !== 'string' || displayName.trim().length < 1 || displayName.trim().length > 30) {
+      return res.status(400).json({ error: 'Display name must be 1-30 characters' });
+    }
+    db.prepare('UPDATE users SET display_name = ? WHERE id = ?').run(displayName.trim(), req.userId);
   }
 
-  db.prepare('UPDATE users SET display_name = ? WHERE id = ?').run(displayName.trim(), req.userId);
+  if (publicKey !== undefined) {
+    if (typeof publicKey !== 'string' || publicKey.trim().length === 0) {
+      return res.status(400).json({ error: 'Public key must be a non-empty string' });
+    }
+    db.prepare('UPDATE users SET public_key = ? WHERE id = ?').run(publicKey.trim(), req.userId);
+  }
 
   const user = db.prepare(
     'SELECT id, contact_code, username, display_name, public_key FROM users WHERE id = ?'
