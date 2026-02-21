@@ -46,7 +46,10 @@ function registerSignalingHandlers(socket) {
 
   // call:ice
   socket.on('call:ice', (data) => {
-    console.log(`[signaling] call:ice from ${userId}, to: ${data?.to}, candidate: ${!!data?.candidate}`);
+    const candStr = data?.candidate?.candidate || '';
+    const typeMatch = candStr.match(/typ (\w+)/);
+    const candType = typeMatch ? typeMatch[1] : 'unknown';
+    console.log(`[signaling] call:ice from ${userId}, to: ${data?.to}, type: ${candType}, candidate: ${candStr}`);
     const { to, candidate } = data;
     if (!to || !candidate) {
       console.log(`[signaling] call:ice DROPPED: missing fields`);
