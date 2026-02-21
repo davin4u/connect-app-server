@@ -6,9 +6,11 @@ function registerChatHandlers(socket) {
 
   // message:send
   socket.on('message:send', (data) => {
+    console.log(`[chat] message:send from ${userId}`, JSON.stringify(data).slice(0, 200));
     const { id, to, ciphertext, nonce, timestamp } = data;
 
     if (!id || !to || !ciphertext || !nonce) {
+      console.log(`[chat] REJECTED: missing fields. id=${id} to=${to} ciphertext=${!!ciphertext} nonce=${!!nonce}`);
       return socket.emit('error', { message: 'Missing required message fields' });
     }
 
@@ -18,6 +20,7 @@ function registerChatHandlers(socket) {
     ).get(userId, to, 'accepted');
 
     if (!contact) {
+      console.log(`[chat] REJECTED: not contacts. sender=${userId} to=${to}`);
       return socket.emit('error', { message: 'Recipient is not in your contacts' });
     }
 
@@ -29,6 +32,7 @@ function registerChatHandlers(socket) {
 
     // Confirm to sender
     socket.emit('message:sent', { id, timestamp: ts });
+    console.log(`[chat] message stored & confirmed. id=${id} to=${to}`);
 
     // Deliver to recipient if online
     const onlineUsers = getOnlineUsers();
@@ -42,6 +46,9 @@ function registerChatHandlers(socket) {
           timestamp: ts,
         });
       }
+      console.log(`[chat] delivered to online recipient ${to}`);
+    } else {
+      console.log(`[chat] recipient ${to} offline, stored for later`);
     }
   });
 
