@@ -5,47 +5,67 @@ function registerSignalingHandlers(socket) {
 
   // call:offer
   socket.on('call:offer', (data) => {
+    console.log(`[signaling] call:offer from ${userId}, data keys: ${Object.keys(data || {})}, to: ${data?.to}, sdp length: ${data?.sdp?.length}`);
     const { to, sdp } = data;
-    if (!to || !sdp) return;
+    if (!to || !sdp) {
+      console.log(`[signaling] call:offer DROPPED: missing fields. to=${to}, sdp=${!!sdp}`);
+      return;
+    }
 
     const onlineUsers = getOnlineUsers();
     if (!onlineUsers.has(to)) {
+      console.log(`[signaling] call:offer REJECTED: ${to} is offline`);
       return socket.emit('call:unavailable', {});
     }
 
     for (const socketId of onlineUsers.get(to)) {
       socket.to(socketId).emit('call:offer', { from: userId, sdp });
     }
+    console.log(`[signaling] call:offer forwarded to ${to}`);
   });
 
   // call:answer
   socket.on('call:answer', (data) => {
+    console.log(`[signaling] call:answer from ${userId}, to: ${data?.to}, sdp length: ${data?.sdp?.length}`);
     const { to, sdp } = data;
-    if (!to || !sdp) return;
+    if (!to || !sdp) {
+      console.log(`[signaling] call:answer DROPPED: missing fields`);
+      return;
+    }
 
     const onlineUsers = getOnlineUsers();
     if (onlineUsers.has(to)) {
       for (const socketId of onlineUsers.get(to)) {
         socket.to(socketId).emit('call:answer', { from: userId, sdp });
       }
+      console.log(`[signaling] call:answer forwarded to ${to}`);
+    } else {
+      console.log(`[signaling] call:answer DROPPED: ${to} is offline`);
     }
   });
 
   // call:ice
   socket.on('call:ice', (data) => {
+    console.log(`[signaling] call:ice from ${userId}, to: ${data?.to}, candidate: ${!!data?.candidate}`);
     const { to, candidate } = data;
-    if (!to || !candidate) return;
+    if (!to || !candidate) {
+      console.log(`[signaling] call:ice DROPPED: missing fields`);
+      return;
+    }
 
     const onlineUsers = getOnlineUsers();
     if (onlineUsers.has(to)) {
       for (const socketId of onlineUsers.get(to)) {
         socket.to(socketId).emit('call:ice', { from: userId, candidate });
       }
+    } else {
+      console.log(`[signaling] call:ice DROPPED: ${to} is offline`);
     }
   });
 
   // call:hangup
   socket.on('call:hangup', (data) => {
+    console.log(`[signaling] call:hangup from ${userId}, to: ${data?.to}`);
     const { to } = data;
     if (!to) return;
 
@@ -59,6 +79,7 @@ function registerSignalingHandlers(socket) {
 
   // call:reject
   socket.on('call:reject', (data) => {
+    console.log(`[signaling] call:reject from ${userId}, to: ${data?.to}`);
     const { to } = data;
     if (!to) return;
 
