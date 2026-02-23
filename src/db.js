@@ -78,25 +78,32 @@ try {
 // SQLite doesn't support ALTER COLUMN, so we must recreate the table
 const usernameCol = db.prepare("PRAGMA table_info(users)").all().find(c => c.name === 'username');
 if (usernameCol && usernameCol.notnull === 1) {
-  db.exec(`
-    CREATE TABLE users_new (
-      id TEXT PRIMARY KEY,
-      contact_code TEXT UNIQUE NOT NULL,
-      display_name TEXT NOT NULL,
-      public_key TEXT NOT NULL,
-      chat_public_key TEXT,
-      username TEXT,
-      password_hash TEXT,
-      created_at INTEGER NOT NULL DEFAULT (unixepoch())
-    );
-    INSERT INTO users_new (id, contact_code, display_name, public_key, chat_public_key, username, password_hash, created_at)
-      SELECT id, contact_code, display_name, public_key, chat_public_key, username, password_hash, created_at FROM users;
-    DROP TABLE users;
-    ALTER TABLE users_new RENAME TO users;
-    CREATE INDEX idx_users_contact_code ON users(contact_code);
-    CREATE UNIQUE INDEX idx_users_public_key ON users(public_key);
-    CREATE UNIQUE INDEX idx_users_chat_public_key ON users(chat_public_key);
-  `);
+  // Must disable FK checks to drop a table referenced by other tables
+  db.pragma('foreign_keys = OFF');
+  const migrate = db.transaction(() => {
+    db.exec(`
+      DROP TABLE IF EXISTS users_new;
+      CREATE TABLE users_new (
+        id TEXT PRIMARY KEY,
+        contact_code TEXT UNIQUE NOT NULL,
+        display_name TEXT NOT NULL,
+        public_key TEXT NOT NULL,
+        chat_public_key TEXT,
+        username TEXT,
+        password_hash TEXT,
+        created_at INTEGER NOT NULL DEFAULT (unixepoch())
+      );
+      INSERT INTO users_new (id, contact_code, display_name, public_key, chat_public_key, username, password_hash, created_at)
+        SELECT id, contact_code, display_name, public_key, chat_public_key, username, password_hash, created_at FROM users;
+      DROP TABLE users;
+      ALTER TABLE users_new RENAME TO users;
+      CREATE INDEX idx_users_contact_code ON users(contact_code);
+      CREATE UNIQUE INDEX idx_users_public_key ON users(public_key);
+      CREATE UNIQUE INDEX idx_users_chat_public_key ON users(chat_public_key);
+    `);
+  });
+  migrate();
+  db.pragma('foreign_keys = ON');
   console.log('[migration] Made username and password_hash columns nullable');
 }
 
