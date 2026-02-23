@@ -5,7 +5,8 @@ const db = require('../db');
 const CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 
 function generateContactCode() {
-  const existing = db.prepare('SELECT 1 FROM users WHERE contact_code = ?');
+  const existingUser = db.prepare('SELECT 1 FROM users WHERE contact_code = ?');
+  const existingRetired = db.prepare('SELECT 1 FROM retired_codes WHERE code = ?');
 
   for (let attempt = 0; attempt < 10; attempt++) {
     const bytes = crypto.randomBytes(8);
@@ -15,7 +16,7 @@ function generateContactCode() {
     }
     const formatted = code.slice(0, 4) + '-' + code.slice(4);
 
-    if (!existing.get(formatted)) {
+    if (!existingUser.get(formatted) && !existingRetired.get(formatted)) {
       return formatted;
     }
   }

@@ -64,14 +64,37 @@ function registerChatHandlers(socket) {
 
     if (!msg) return;
 
-    db.prepare('UPDATE messages SET delivered = 1 WHERE id = ?').run(messageId);
-
     // Notify sender
     const onlineUsers = getOnlineUsers();
     if (onlineUsers.has(msg.sender_id)) {
       for (const socketId of onlineUsers.get(msg.sender_id)) {
         socket.to(socketId).emit('message:delivered', { messageId });
       }
+    }
+
+    // Delete from server DB — messages live on clients only
+    db.prepare('DELETE FROM messages WHERE id = ?').run(messageId);
+  });
+
+  // message:delete — sender deletes their own message
+  socket.on('message:delete', ({ messageId, to }) => {
+    const senderId = userId;
+
+    // If the message still exists on server (undelivered), delete it
+    db.prepare('DELETE FROM messages WHERE id = ? AND sender_id = ?').run(messageId, senderId);
+
+    // Forward delete event to recipient
+    const onlineUsers = getOnlineUsers();
+    if (onlineUsers.has(to)) {
+      for (const socketId of onlineUsers.get(to)) {
+        socket.to(socketId).emit('message:deleted', { messageId, from: senderId });
+      }
+    } else {
+      // Recipient offline — store for later delivery
+      const { v4: uuid } = require('uuid');
+      db.prepare(
+        'INSERT INTO pending_events (id, user_id, event_type, payload, timestamp) VALUES (?, ?, ?, ?, ?)'
+      ).run(uuid(), to, 'message:deleted', JSON.stringify({ messageId, from: senderId }), Math.floor(Date.now() / 1000));
     }
   });
 

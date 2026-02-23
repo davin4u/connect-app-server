@@ -1,11 +1,12 @@
 const express = require('express');
 const db = require('../db');
-const { requireAuth } = require('../auth');
+const { requireSignatureAuth } = require('../signatureAuth');
+const { generateContactCode } = require('../utils/contactCode');
 
 const router = express.Router();
 
-// All routes here require authentication
-router.use(requireAuth);
+// All routes here require signature authentication
+router.use(requireSignatureAuth);
 
 // GET /api/contacts
 router.get('/', (req, res) => {
@@ -13,7 +14,7 @@ router.get('/', (req, res) => {
 
   // Get accepted contacts in both directions
   const contacts = db.prepare(`
-    SELECT u.id, u.contact_code, u.display_name, u.public_key
+    SELECT u.id, u.contact_code, u.display_name, u.public_key, u.chat_public_key
     FROM contacts c
     JOIN users u ON u.id = CASE
       WHEN c.user_id = ? THEN c.contact_id
@@ -30,6 +31,7 @@ router.get('/', (req, res) => {
       contactCode: c.contact_code,
       displayName: c.display_name,
       publicKey: c.public_key,
+      chatPublicKey: c.chat_public_key,
     })),
   });
 });
@@ -88,7 +90,7 @@ router.post('/add', (req, res) => {
     'INSERT INTO contacts (user_id, contact_id, status) VALUES (?, ?, ?)'
   ).run(userId, target.id, 'pending');
 
-  // Notify target via Socket.IO if online (handled by the caller via getIO)
+  // Notify target via Socket.IO if online
   const { getOnlineUsers, getIO } = require('../socket/presence');
   const onlineUsers = getOnlineUsers();
   if (onlineUsers.has(target.id)) {
@@ -136,12 +138,12 @@ router.post('/accept', (req, res) => {
   });
   acceptTransaction();
 
-  // Notify requester if online
+  // Notify requester if online — include chatPublicKey
   const { getOnlineUsers, getIO } = require('../socket/presence');
   const onlineUsers = getOnlineUsers();
   if (onlineUsers.has(requesterId)) {
     const currentUser = db.prepare(
-      'SELECT id, contact_code, display_name, public_key FROM users WHERE id = ?'
+      'SELECT id, contact_code, display_name, public_key, chat_public_key FROM users WHERE id = ?'
     ).get(userId);
     const io = getIO();
     for (const socketId of onlineUsers.get(requesterId)) {
@@ -150,6 +152,7 @@ router.post('/accept', (req, res) => {
         contactCode: currentUser.contact_code,
         displayName: currentUser.display_name,
         publicKey: currentUser.public_key,
+        chatPublicKey: currentUser.chat_public_key,
       });
     }
   }
@@ -171,6 +174,31 @@ router.post('/reject', (req, res) => {
   ).run(requesterId, userId, 'pending');
 
   res.json({ status: 'rejected' });
+});
+
+// POST /api/contacts/regenerate-code
+router.post('/regenerate-code', (req, res) => {
+  const userId = req.userId;
+
+  // Get current code
+  const user = db.prepare('SELECT contact_code FROM users WHERE id = ?').get(userId);
+  if (!user) {
+    return res.status(404).json({ error: 'User not found' });
+  }
+
+  const oldCode = user.contact_code;
+  const newCode = generateContactCode();
+
+  const transaction = db.transaction(() => {
+    // Retire old code
+    db.prepare('INSERT OR IGNORE INTO retired_codes (code, retired_at) VALUES (?, unixepoch())').run(oldCode);
+
+    // Update user with new code
+    db.prepare('UPDATE users SET contact_code = ? WHERE id = ?').run(newCode, userId);
+  });
+  transaction();
+
+  res.json({ contactCode: newCode });
 });
 
 module.exports = router;

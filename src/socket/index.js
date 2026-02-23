@@ -1,5 +1,6 @@
 const { Server } = require('socket.io');
-const { verifyToken } = require('../auth');
+const nacl = require('tweetnacl');
+const { decodeBase64 } = require('tweetnacl-util');
 const db = require('../db');
 const { setIO, addSocket, removeSocket, isUserOnline, getAcceptedContactIds } = require('./presence');
 const { registerChatHandlers } = require('./chat');
@@ -16,20 +17,44 @@ function initSocketIO(httpServer) {
 
   setIO(io);
 
-  // Authentication middleware
+  // Signature-based authentication middleware
   io.use((socket, next) => {
-    const token = socket.handshake.auth.token;
-    if (!token) {
+    const { publicKey, timestamp, signature } = socket.handshake.auth;
+
+    if (!publicKey || !timestamp || !signature) {
       return next(new Error('Authentication required'));
     }
 
-    try {
-      const payload = verifyToken(token);
-      socket.userId = payload.userId;
-      next();
-    } catch {
-      next(new Error('Invalid or expired token'));
+    // Replay protection: timestamp within 5 minutes
+    const now = Math.floor(Date.now() / 1000);
+    if (Math.abs(now - parseInt(timestamp, 10)) > 300) {
+      return next(new Error('Authentication expired'));
     }
+
+    // Verify Ed25519 signature of timestamp string
+    let isValid;
+    try {
+      isValid = nacl.sign.detached.verify(
+        new TextEncoder().encode(timestamp),
+        decodeBase64(signature),
+        decodeBase64(publicKey)
+      );
+    } catch {
+      return next(new Error('Invalid signature format'));
+    }
+
+    if (!isValid) {
+      return next(new Error('Invalid signature'));
+    }
+
+    // Look up user by public_key
+    const user = db.prepare('SELECT id FROM users WHERE public_key = ?').get(publicKey);
+    if (!user) {
+      return next(new Error('Unknown identity'));
+    }
+
+    socket.userId = user.id;
+    next();
   });
 
   io.on('connection', (socket) => {
@@ -65,6 +90,20 @@ function initSocketIO(httpServer) {
         nonce: msg.nonce,
         timestamp: msg.timestamp,
       });
+    }
+
+    // Deliver pending events (e.g. message deletions while offline)
+    const pendingEvents = db.prepare(
+      'SELECT * FROM pending_events WHERE user_id = ? ORDER BY timestamp ASC'
+    ).all(userId);
+
+    for (const event of pendingEvents) {
+      const payload = JSON.parse(event.payload);
+      socket.emit(event.event_type, payload);
+    }
+
+    if (pendingEvents.length > 0) {
+      db.prepare('DELETE FROM pending_events WHERE user_id = ?').run(userId);
     }
 
     // Handle disconnect

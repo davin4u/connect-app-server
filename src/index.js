@@ -26,15 +26,29 @@ const registerLimiter = rateLimit({
   message: { error: 'Too many registration attempts, try again later' },
 });
 
-const loginLimiter = rateLimit({
+const powChallengeLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: 10,
-  message: { error: 'Too many login attempts, try again later' },
+  message: { error: 'Too many challenge requests, try again later' },
+});
+
+const recoverLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 10,
+  message: { error: 'Too many recovery attempts, try again later' },
+});
+
+const generateNameLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 20,
+  message: { error: 'Too many name generation requests, try again later' },
 });
 
 // Routes
+app.use('/api/pow/challenge', powChallengeLimiter);
 app.use('/api/register', registerLimiter);
-app.use('/api/login', loginLimiter);
+app.use('/api/recover', recoverLimiter);
+app.use('/api/generate-name', generateNameLimiter);
 app.use('/api', authRoutes);
 app.use('/api/contacts', contactsRoutes);
 
