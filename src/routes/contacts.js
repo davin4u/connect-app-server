@@ -40,19 +40,36 @@ router.get('/', (req, res) => {
 router.get('/requests', (req, res) => {
   const userId = req.userId;
 
-  const requests = db.prepare(`
-    SELECT u.id, u.contact_code, u.display_name
+  // Incoming: others sent to me
+  const incoming = db.prepare(`
+    SELECT u.id, u.contact_code, u.display_name, c.created_at
     FROM contacts c
     JOIN users u ON u.id = c.user_id
     WHERE c.contact_id = ? AND c.status = 'pending'
+    ORDER BY c.created_at DESC
   `).all(userId);
 
+  // Outgoing: I sent to others
+  const outgoing = db.prepare(`
+    SELECT u.id, u.contact_code, u.display_name, c.created_at
+    FROM contacts c
+    JOIN users u ON u.id = c.contact_id
+    WHERE c.user_id = ? AND c.status = 'pending'
+    ORDER BY c.created_at DESC
+  `).all(userId);
+
+  const mapRow = r => ({
+    id: r.id,
+    contactCode: r.contact_code,
+    displayName: r.display_name,
+    createdAt: r.created_at,
+  });
+
   res.json({
-    requests: requests.map(r => ({
-      id: r.id,
-      contactCode: r.contact_code,
-      displayName: r.display_name,
-    })),
+    incoming: incoming.map(mapRow),
+    outgoing: outgoing.map(mapRow),
+    // Backward compat: flat list of incoming for older clients
+    requests: incoming.map(mapRow),
   });
 });
 
