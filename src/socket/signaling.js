@@ -19,7 +19,7 @@ function registerSignalingHandlers(socket) {
     }
 
     for (const socketId of onlineUsers.get(to)) {
-      socket.to(socketId).emit('call:offer', { from: userId, sdp });
+      socket.to(socketId).emit('call:offer', { from: userId, sdp, callType: data.callType || 'voice' });
     }
     console.log(`[signaling] call:offer forwarded to ${to}`);
   });
@@ -76,6 +76,20 @@ function registerSignalingHandlers(socket) {
     if (onlineUsers.has(to)) {
       for (const socketId of onlineUsers.get(to)) {
         socket.to(socketId).emit('call:hangup', { from: userId });
+      }
+    }
+  });
+
+  // call:toggle-video
+  socket.on('call:toggle-video', (data) => {
+    console.log(`[signaling] call:toggle-video from ${userId}, to: ${data?.to}, videoEnabled: ${data?.videoEnabled}`);
+    const { to, videoEnabled } = data;
+    if (!to || videoEnabled === undefined) return;
+
+    const onlineUsers = getOnlineUsers();
+    if (onlineUsers.has(to)) {
+      for (const socketId of onlineUsers.get(to)) {
+        socket.to(socketId).emit('call:toggle-video', { from: userId, videoEnabled });
       }
     }
   });
