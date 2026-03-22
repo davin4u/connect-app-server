@@ -18,7 +18,7 @@ function initSocketIO(httpServer) {
   setIO(io);
 
   // Signature-based authentication middleware
-  io.use((socket, next) => {
+  io.use(async (socket, next) => {
     const { publicKey, timestamp, signature } = socket.handshake.auth;
 
     if (!publicKey || !timestamp || !signature) {
@@ -48,7 +48,7 @@ function initSocketIO(httpServer) {
     }
 
     // Look up user by public_key
-    const user = db.prepare('SELECT id FROM users WHERE public_key = ?').get(publicKey);
+    const user = await db.get('SELECT id FROM users WHERE public_key = ?', [publicKey]);
     if (!user) {
       return next(new Error('Unknown identity'));
     }
@@ -58,7 +58,7 @@ function initSocketIO(httpServer) {
     next();
   });
 
-  io.on('connection', (socket) => {
+  io.on('connection', async (socket) => {
     const userId = socket.userId;
     const socketType = socket.socketType || 'app';
     console.log(`User connected: ${userId} (socket: ${socket.id}, type: ${socketType})`);
@@ -75,7 +75,7 @@ function initSocketIO(httpServer) {
       registerContactHandlers(socket);
 
       // Send current online status of contacts
-      const contactIds = getAcceptedContactIds(userId);
+      const contactIds = await getAcceptedContactIds(userId);
       for (const contactId of contactIds) {
         if (hasAppSocket(contactId)) {
           socket.emit('presence:update', { userId: contactId, online: true });
@@ -83,9 +83,10 @@ function initSocketIO(httpServer) {
       }
 
       // Deliver unread messages
-      const undelivered = db.prepare(
-        'SELECT id, sender_id, ciphertext, nonce, timestamp FROM messages WHERE receiver_id = ? AND delivered = 0 ORDER BY timestamp ASC'
-      ).all(userId);
+      const undelivered = await db.all(
+        'SELECT id, sender_id, ciphertext, nonce, timestamp FROM messages WHERE receiver_id = ? AND delivered = 0 ORDER BY timestamp ASC',
+        [userId]
+      );
 
       for (const msg of undelivered) {
         socket.emit('message:receive', {
@@ -98,9 +99,10 @@ function initSocketIO(httpServer) {
       }
 
       // Deliver pending events (e.g. message deletions while offline)
-      const pendingEvents = db.prepare(
-        'SELECT * FROM pending_events WHERE user_id = ? ORDER BY timestamp ASC'
-      ).all(userId);
+      const pendingEvents = await db.all(
+        'SELECT * FROM pending_events WHERE user_id = ? ORDER BY timestamp ASC',
+        [userId]
+      );
 
       for (const event of pendingEvents) {
         const payload = JSON.parse(event.payload);
@@ -108,7 +110,7 @@ function initSocketIO(httpServer) {
       }
 
       if (pendingEvents.length > 0) {
-        db.prepare('DELETE FROM pending_events WHERE user_id = ?').run(userId);
+        await db.run('DELETE FROM pending_events WHERE user_id = ?', [userId]);
       }
     }
 

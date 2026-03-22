@@ -27,8 +27,8 @@ function isUserOnline(userId) {
   return onlineUsers.has(userId) && onlineUsers.get(userId).size > 0;
 }
 
-function getAcceptedContactIds(userId) {
-  const rows = db.prepare(`
+async function getAcceptedContactIds(userId) {
+  const rows = await db.all(`
     SELECT CASE
       WHEN user_id = ? THEN contact_id
       ELSE user_id
@@ -36,13 +36,13 @@ function getAcceptedContactIds(userId) {
     FROM contacts
     WHERE (user_id = ? OR contact_id = ?)
       AND status = 'accepted'
-  `).all(userId, userId, userId);
+  `, [userId, userId, userId]);
 
   return rows.map(r => r.contact_id);
 }
 
-function broadcastPresence(userId, online) {
-  const contactIds = getAcceptedContactIds(userId);
+async function broadcastPresence(userId, online) {
+  const contactIds = await getAcceptedContactIds(userId);
 
   for (const contactId of contactIds) {
     if (onlineUsers.has(contactId)) {

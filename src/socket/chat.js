@@ -5,7 +5,7 @@ function registerChatHandlers(socket) {
   const userId = socket.userId;
 
   // message:send
-  socket.on('message:send', (data) => {
+  socket.on('message:send', async (data) => {
     console.log(`[chat] message:send from ${userId}`, JSON.stringify(data).slice(0, 200));
     const { id, to, ciphertext, nonce, timestamp } = data;
 
@@ -15,9 +15,10 @@ function registerChatHandlers(socket) {
     }
 
     // Verify sender and recipient are accepted contacts
-    const contact = db.prepare(
-      'SELECT 1 FROM contacts WHERE user_id = ? AND contact_id = ? AND status = ?'
-    ).get(userId, to, 'accepted');
+    const contact = await db.get(
+      'SELECT 1 FROM contacts WHERE user_id = ? AND contact_id = ? AND status = ?',
+      [userId, to, 'accepted']
+    );
 
     if (!contact) {
       console.log(`[chat] REJECTED: not contacts. sender=${userId} to=${to}`);
@@ -26,9 +27,10 @@ function registerChatHandlers(socket) {
 
     // Store message in DB
     const ts = timestamp || Math.floor(Date.now() / 1000);
-    db.prepare(
-      'INSERT INTO messages (id, sender_id, receiver_id, ciphertext, nonce, timestamp) VALUES (?, ?, ?, ?, ?, ?)'
-    ).run(id, userId, to, ciphertext, nonce, ts);
+    await db.run(
+      'INSERT INTO messages (id, sender_id, receiver_id, ciphertext, nonce, timestamp) VALUES (?, ?, ?, ?, ?, ?)',
+      [id, userId, to, ciphertext, nonce, ts]
+    );
 
     // Confirm to sender
     socket.emit('message:sent', { id, timestamp: ts });
@@ -53,14 +55,15 @@ function registerChatHandlers(socket) {
   });
 
   // message:ack
-  socket.on('message:ack', (data) => {
+  socket.on('message:ack', async (data) => {
     const { messageId } = data;
     if (!messageId) return;
 
     // Mark as delivered
-    const msg = db.prepare(
-      'SELECT sender_id FROM messages WHERE id = ? AND receiver_id = ?'
-    ).get(messageId, userId);
+    const msg = await db.get(
+      'SELECT sender_id FROM messages WHERE id = ? AND receiver_id = ?',
+      [messageId, userId]
+    );
 
     if (!msg) return;
 
@@ -73,15 +76,15 @@ function registerChatHandlers(socket) {
     }
 
     // Delete from server DB — messages live on clients only
-    db.prepare('DELETE FROM messages WHERE id = ?').run(messageId);
+    await db.run('DELETE FROM messages WHERE id = ?', [messageId]);
   });
 
   // message:delete — sender deletes their own message
-  socket.on('message:delete', ({ messageId, to }) => {
+  socket.on('message:delete', async ({ messageId, to }) => {
     const senderId = userId;
 
     // If the message still exists on server (undelivered), delete it
-    db.prepare('DELETE FROM messages WHERE id = ? AND sender_id = ?').run(messageId, senderId);
+    await db.run('DELETE FROM messages WHERE id = ? AND sender_id = ?', [messageId, senderId]);
 
     // Forward delete event to recipient
     const onlineUsers = getOnlineUsers();
@@ -92,9 +95,10 @@ function registerChatHandlers(socket) {
     } else {
       // Recipient offline — store for later delivery
       const { v4: uuid } = require('uuid');
-      db.prepare(
-        'INSERT INTO pending_events (id, user_id, event_type, payload, timestamp) VALUES (?, ?, ?, ?, ?)'
-      ).run(uuid(), to, 'message:deleted', JSON.stringify({ messageId, from: senderId }), Math.floor(Date.now() / 1000));
+      await db.run(
+        'INSERT INTO pending_events (id, user_id, event_type, payload, timestamp) VALUES (?, ?, ?, ?, ?)',
+        [uuid(), to, 'message:deleted', JSON.stringify({ messageId, from: senderId }), Math.floor(Date.now() / 1000)]
+      );
     }
   });
 

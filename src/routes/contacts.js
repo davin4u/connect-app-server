@@ -9,11 +9,11 @@ const router = express.Router();
 router.use(requireSignatureAuth);
 
 // GET /api/contacts
-router.get('/', (req, res) => {
+router.get('/', async (req, res) => {
   const userId = req.userId;
 
   // Get accepted contacts in both directions
-  const contacts = db.prepare(`
+  const contacts = await db.all(`
     SELECT u.id, u.contact_code, u.display_name, u.public_key, u.chat_public_key
     FROM contacts c
     JOIN users u ON u.id = CASE
@@ -23,7 +23,7 @@ router.get('/', (req, res) => {
     WHERE (c.user_id = ? OR c.contact_id = ?)
       AND c.status = 'accepted'
     GROUP BY u.id
-  `).all(userId, userId, userId);
+  `, [userId, userId, userId]);
 
   res.json({
     contacts: contacts.map(c => ({
@@ -37,26 +37,26 @@ router.get('/', (req, res) => {
 });
 
 // GET /api/contacts/requests
-router.get('/requests', (req, res) => {
+router.get('/requests', async (req, res) => {
   const userId = req.userId;
 
   // Incoming: others sent to me
-  const incoming = db.prepare(`
+  const incoming = await db.all(`
     SELECT u.id, u.contact_code, u.display_name, c.created_at
     FROM contacts c
     JOIN users u ON u.id = c.user_id
     WHERE c.contact_id = ? AND c.status = 'pending'
     ORDER BY c.created_at DESC
-  `).all(userId);
+  `, [userId]);
 
   // Outgoing: I sent to others
-  const outgoing = db.prepare(`
+  const outgoing = await db.all(`
     SELECT u.id, u.contact_code, u.display_name, c.created_at
     FROM contacts c
     JOIN users u ON u.id = c.contact_id
     WHERE c.user_id = ? AND c.status = 'pending'
     ORDER BY c.created_at DESC
-  `).all(userId);
+  `, [userId]);
 
   const mapRow = r => ({
     id: r.id,
@@ -74,7 +74,7 @@ router.get('/requests', (req, res) => {
 });
 
 // POST /api/contacts/add
-router.post('/add', (req, res) => {
+router.post('/add', async (req, res) => {
   const userId = req.userId;
   const { contactCode } = req.body;
 
@@ -83,7 +83,7 @@ router.post('/add', (req, res) => {
   }
 
   // Find target user by contact code
-  const target = db.prepare('SELECT id FROM users WHERE contact_code = ?').get(contactCode);
+  const target = await db.get('SELECT id FROM users WHERE contact_code = ?', [contactCode]);
   if (!target) {
     return res.status(404).json({ error: 'Contact code not found' });
   }
@@ -94,24 +94,26 @@ router.post('/add', (req, res) => {
   }
 
   // Check for existing relationship in either direction
-  const existing = db.prepare(
-    'SELECT status FROM contacts WHERE (user_id = ? AND contact_id = ?) OR (user_id = ? AND contact_id = ?)'
-  ).get(userId, target.id, target.id, userId);
+  const existing = await db.get(
+    'SELECT status FROM contacts WHERE (user_id = ? AND contact_id = ?) OR (user_id = ? AND contact_id = ?)',
+    [userId, target.id, target.id, userId]
+  );
 
   if (existing) {
     return res.status(409).json({ error: 'Contact relationship already exists' });
   }
 
   // Insert pending request (sender -> receiver)
-  db.prepare(
-    'INSERT INTO contacts (user_id, contact_id, status) VALUES (?, ?, ?)'
-  ).run(userId, target.id, 'pending');
+  await db.run(
+    'INSERT INTO contacts (user_id, contact_id, status) VALUES (?, ?, ?)',
+    [userId, target.id, 'pending']
+  );
 
   // Notify target via Socket.IO if online
   const { getOnlineUsers, getIO } = require('../socket/presence');
   const onlineUsers = getOnlineUsers();
   if (onlineUsers.has(target.id)) {
-    const sender = db.prepare('SELECT id, contact_code, display_name FROM users WHERE id = ?').get(userId);
+    const sender = await db.get('SELECT id, contact_code, display_name FROM users WHERE id = ?', [userId]);
     const io = getIO();
     for (const socketId of onlineUsers.get(target.id)) {
       io.to(socketId).emit('contact:request', {
@@ -126,7 +128,7 @@ router.post('/add', (req, res) => {
 });
 
 // POST /api/contacts/accept
-router.post('/accept', (req, res) => {
+router.post('/accept', async (req, res) => {
   const userId = req.userId;
   const { userId: requesterId } = req.body;
 
@@ -135,33 +137,35 @@ router.post('/accept', (req, res) => {
   }
 
   // Find the pending request
-  const pending = db.prepare(
-    'SELECT 1 FROM contacts WHERE user_id = ? AND contact_id = ? AND status = ?'
-  ).get(requesterId, userId, 'pending');
+  const pending = await db.get(
+    'SELECT 1 FROM contacts WHERE user_id = ? AND contact_id = ? AND status = ?',
+    [requesterId, userId, 'pending']
+  );
 
   if (!pending) {
     return res.status(404).json({ error: 'No pending request from this user' });
   }
 
   // Update to accepted and insert reverse row
-  const acceptTransaction = db.transaction(() => {
-    db.prepare(
-      'UPDATE contacts SET status = ? WHERE user_id = ? AND contact_id = ?'
-    ).run('accepted', requesterId, userId);
-
-    db.prepare(
-      'INSERT INTO contacts (user_id, contact_id, status) VALUES (?, ?, ?)'
-    ).run(userId, requesterId, 'accepted');
+  await db.transaction(async (client) => {
+    await client.run(
+      'UPDATE contacts SET status = ? WHERE user_id = ? AND contact_id = ?',
+      ['accepted', requesterId, userId]
+    );
+    await client.run(
+      'INSERT INTO contacts (user_id, contact_id, status) VALUES (?, ?, ?)',
+      [userId, requesterId, 'accepted']
+    );
   });
-  acceptTransaction();
 
   // Notify requester if online — include chatPublicKey
   const { getOnlineUsers, getIO } = require('../socket/presence');
   const onlineUsers = getOnlineUsers();
   if (onlineUsers.has(requesterId)) {
-    const currentUser = db.prepare(
-      'SELECT id, contact_code, display_name, public_key, chat_public_key FROM users WHERE id = ?'
-    ).get(userId);
+    const currentUser = await db.get(
+      'SELECT id, contact_code, display_name, public_key, chat_public_key FROM users WHERE id = ?',
+      [userId]
+    );
     const io = getIO();
     for (const socketId of onlineUsers.get(requesterId)) {
       io.to(socketId).emit('contact:accepted', {
@@ -178,7 +182,7 @@ router.post('/accept', (req, res) => {
 });
 
 // POST /api/contacts/reject
-router.post('/reject', (req, res) => {
+router.post('/reject', async (req, res) => {
   const userId = req.userId;
   const { userId: requesterId } = req.body;
 
@@ -186,19 +190,20 @@ router.post('/reject', (req, res) => {
     return res.status(400).json({ error: 'Requester userId is required' });
   }
 
-  db.prepare(
-    'DELETE FROM contacts WHERE user_id = ? AND contact_id = ? AND status = ?'
-  ).run(requesterId, userId, 'pending');
+  await db.run(
+    'DELETE FROM contacts WHERE user_id = ? AND contact_id = ? AND status = ?',
+    [requesterId, userId, 'pending']
+  );
 
   res.json({ status: 'rejected' });
 });
 
 // POST /api/contacts/regenerate-code
-router.post('/regenerate-code', (req, res) => {
+router.post('/regenerate-code', async (req, res) => {
   const userId = req.userId;
 
   // Get current code
-  const user = db.prepare('SELECT contact_code FROM users WHERE id = ?').get(userId);
+  const user = await db.get('SELECT contact_code FROM users WHERE id = ?', [userId]);
   if (!user) {
     return res.status(404).json({ error: 'User not found' });
   }
@@ -206,14 +211,18 @@ router.post('/regenerate-code', (req, res) => {
   const oldCode = user.contact_code;
   const newCode = generateContactCode();
 
-  const transaction = db.transaction(() => {
+  await db.transaction(async (client) => {
     // Retire old code
-    db.prepare('INSERT OR IGNORE INTO retired_codes (code, retired_at) VALUES (?, unixepoch())').run(oldCode);
+    const insertIgnoreSQL = db.insertIgnore(
+      'retired_codes',
+      `code, retired_at`,
+      `?, ${db.nowEpoch()}`
+    );
+    await client.run(insertIgnoreSQL, [oldCode]);
 
     // Update user with new code
-    db.prepare('UPDATE users SET contact_code = ? WHERE id = ?').run(newCode, userId);
+    await client.run('UPDATE users SET contact_code = ? WHERE id = ?', [newCode, userId]);
   });
-  transaction();
 
   res.json({ contactCode: newCode });
 });

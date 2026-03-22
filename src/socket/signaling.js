@@ -5,7 +5,7 @@ function registerSignalingHandlers(socket) {
   const userId = socket.userId;
 
   // call:offer
-  socket.on('call:offer', (data) => {
+  socket.on('call:offer', async (data) => {
     console.log(`[signaling] call:offer from ${userId}, data keys: ${Object.keys(data || {})}, to: ${data?.to}, sdp length: ${data?.sdp?.length}`);
     const { to, sdp } = data;
     if (!to || !sdp) {
@@ -20,7 +20,7 @@ function registerSignalingHandlers(socket) {
     }
 
     // Look up caller's display name for incoming call notification
-    const caller = db.prepare('SELECT display_name FROM users WHERE id = ?').get(userId);
+    const caller = await db.get('SELECT display_name FROM users WHERE id = ?', [userId]);
     const callerName = caller ? caller.display_name : 'Unknown';
 
     for (const socketId of onlineUsers.get(to)) {

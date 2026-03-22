@@ -19,7 +19,7 @@ router.post('/pow/challenge', (req, res) => {
 });
 
 // POST /api/register — create account with PoW proof
-router.post('/register', (req, res) => {
+router.post('/register', async (req, res) => {
   const { challenge, nonce, publicKey, chatPublicKey, displayName } = req.body;
 
   // Validate required fields
@@ -45,13 +45,13 @@ router.post('/register', (req, res) => {
   }
 
   // Check publicKey uniqueness
-  const existingKey = db.prepare('SELECT 1 FROM users WHERE public_key = ?').get(publicKey);
+  const existingKey = await db.get('SELECT 1 FROM users WHERE public_key = ?', [publicKey]);
   if (existingKey) {
     return res.status(409).json({ error: 'Public key already registered' });
   }
 
   // Check display name uniqueness
-  const existingName = db.prepare('SELECT 1 FROM users WHERE display_name = ?').get(displayName.trim());
+  const existingName = await db.get('SELECT 1 FROM users WHERE display_name = ?', [displayName.trim()]);
   if (existingName) {
     return res.status(409).json({ error: 'Display name already taken' });
   }
@@ -59,9 +59,10 @@ router.post('/register', (req, res) => {
   const id = uuidv4();
   const contactCode = generateContactCode();
 
-  db.prepare(
-    'INSERT INTO users (id, contact_code, display_name, public_key, chat_public_key) VALUES (?, ?, ?, ?, ?)'
-  ).run(id, contactCode, displayName.trim(), publicKey, chatPublicKey);
+  await db.run(
+    'INSERT INTO users (id, contact_code, display_name, public_key, chat_public_key) VALUES (?, ?, ?, ?, ?)',
+    [id, contactCode, displayName.trim(), publicKey, chatPublicKey]
+  );
 
   res.status(201).json({
     id,
@@ -71,23 +72,24 @@ router.post('/register', (req, res) => {
 });
 
 // POST /api/recover — look up account by public key
-router.post('/recover', (req, res) => {
+router.post('/recover', async (req, res) => {
   const { publicKey } = req.body;
 
   if (!publicKey || typeof publicKey !== 'string') {
     return res.status(400).json({ error: 'Public key is required' });
   }
 
-  const user = db.prepare(
-    'SELECT id, contact_code, display_name, public_key, chat_public_key FROM users WHERE public_key = ?'
-  ).get(publicKey);
+  const user = await db.get(
+    'SELECT id, contact_code, display_name, public_key, chat_public_key FROM users WHERE public_key = ?',
+    [publicKey]
+  );
 
   if (!user) {
     return res.status(404).json({ error: 'Identity not found' });
   }
 
   // Get contacts
-  const contacts = db.prepare(`
+  const contacts = await db.all(`
     SELECT u.id, u.contact_code, u.display_name, u.public_key, u.chat_public_key
     FROM contacts c
     JOIN users u ON u.id = CASE
@@ -97,7 +99,7 @@ router.post('/recover', (req, res) => {
     WHERE (c.user_id = ? OR c.contact_id = ?)
       AND c.status = 'accepted'
     GROUP BY u.id
-  `).all(user.id, user.id, user.id);
+  `, [user.id, user.id, user.id]);
 
   res.json({
     id: user.id,
