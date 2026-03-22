@@ -8,6 +8,7 @@ const config = require('./config');
 const db = require('./db');
 const authRoutes = require('./routes/auth');
 const contactsRoutes = require('./routes/contacts');
+const adminRoutes = require('./routes/admin');
 const { initSocketIO } = require('./socket');
 
 async function start() {
@@ -46,6 +47,12 @@ async function start() {
     message: { error: 'Too many name generation requests, try again later' },
   });
 
+  const adminLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: 60,
+    message: { error: 'Too many admin requests, try again later' },
+  });
+
   // Routes
   app.use('/api/pow/challenge', powChallengeLimiter);
   app.use('/api/register', registerLimiter);
@@ -53,6 +60,8 @@ async function start() {
   app.use('/api/generate-name', generateNameLimiter);
   app.use('/api', authRoutes);
   app.use('/api/contacts', contactsRoutes);
+  app.use('/api/admin', adminLimiter);
+  app.use('/api/admin', adminRoutes);
 
   // Health check
   app.get('/health', (_req, res) => {
