@@ -209,7 +209,7 @@ router.post('/regenerate-code', async (req, res) => {
   }
 
   const oldCode = user.contact_code;
-  const newCode = generateContactCode();
+  const newCode = await generateContactCode();
 
   await db.transaction(async (client) => {
     // Retire old code

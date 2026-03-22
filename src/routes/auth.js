@@ -57,7 +57,7 @@ router.post('/register', async (req, res) => {
   }
 
   const id = uuidv4();
-  const contactCode = generateContactCode();
+  const contactCode = await generateContactCode();
 
   await db.run(
     'INSERT INTO users (id, contact_code, display_name, public_key, chat_public_key) VALUES (?, ?, ?, ?, ?)',
@@ -118,9 +118,9 @@ router.post('/recover', async (req, res) => {
 });
 
 // POST /api/generate-name — generate a random unique display name
-router.post('/generate-name', (_req, res) => {
+router.post('/generate-name', async (_req, res) => {
   try {
-    const name = generateDisplayName();
+    const name = await generateDisplayName();
     res.json({ name });
   } catch (e) {
     res.status(500).json({ error: 'Failed to generate name' });

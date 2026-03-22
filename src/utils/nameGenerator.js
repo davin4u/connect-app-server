@@ -56,16 +56,15 @@ const NOUNS = [
   'Gleam', 'Horn', 'Isle', 'Jade', 'Knoll', 'Ledge', 'Mound', 'Notch',
 ];
 
-function generateDisplayName() {
-  const checkName = db.prepare('SELECT 1 FROM users WHERE display_name = ?');
-
+async function generateDisplayName() {
   for (let attempt = 0; attempt < 50; attempt++) {
     const adj = ADJECTIVES[Math.floor(Math.random() * ADJECTIVES.length)];
     const noun = NOUNS[Math.floor(Math.random() * NOUNS.length)];
     const num = String(Math.floor(Math.random() * 99) + 1).padStart(2, '0');
     const name = `${adj} ${noun} ${num}`;
 
-    if (!checkName.get(name)) {
+    const existing = await db.get('SELECT 1 FROM users WHERE display_name = ?', [name]);
+    if (!existing) {
       return name;
     }
   }

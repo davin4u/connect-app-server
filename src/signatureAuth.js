@@ -2,7 +2,7 @@ const nacl = require('tweetnacl');
 const { decodeBase64 } = require('tweetnacl-util');
 const db = require('./db');
 
-function requireSignatureAuth(req, res, next) {
+async function requireSignatureAuth(req, res, next) {
   const publicKey = req.headers['x-public-key'];
   const signature = req.headers['x-signature'];
   const timestamp = req.headers['x-timestamp'];
@@ -38,7 +38,7 @@ function requireSignatureAuth(req, res, next) {
   }
 
   // Look up user by public_key
-  const user = db.prepare('SELECT id, public_key, chat_public_key, display_name, contact_code FROM users WHERE public_key = ?').get(publicKey);
+  const user = await db.get('SELECT id, public_key, chat_public_key, display_name, contact_code FROM users WHERE public_key = ?', [publicKey]);
   if (!user) {
     return res.status(401).json({ error: 'Unknown identity' });
   }
