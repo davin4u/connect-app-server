@@ -4,7 +4,7 @@ const { decodeBase64 } = require('tweetnacl-util');
 const db = require('../db');
 const { setIO, addSocket, removeSocket, isUserOnline, hasAppSocket, getAcceptedContactIds } = require('./presence');
 const { registerChatHandlers } = require('./chat');
-const { registerSignalingHandlers } = require('./signaling');
+const { registerSignalingHandlers, cleanupCallTracking } = require('./signaling');
 const { registerContactHandlers } = require('./contacts');
 
 function initSocketIO(httpServer) {
@@ -118,6 +118,7 @@ function initSocketIO(httpServer) {
     socket.on('disconnect', () => {
       console.log(`User disconnected: ${userId} (socket: ${socket.id})`);
       removeSocket(userId, socket.id);
+      cleanupCallTracking(userId);
     });
   });
 

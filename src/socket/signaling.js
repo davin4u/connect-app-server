@@ -1,6 +1,26 @@
 const { getOnlineUsers } = require('./presence');
 const db = require('../db');
 
+// Map<callKey, startTime> for tracking call duration
+const activeCalls = new Map();
+
+function getCallKey(userA, userB) {
+  return [userA, userB].sort().join(':');
+}
+
+function getToday() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+async function incrementDailyStat(column, value = 1) {
+  const today = getToday();
+  await db.run(
+    `INSERT INTO daily_stats (date, ${column}) VALUES (?, ?)
+     ON CONFLICT(date) DO UPDATE SET ${column} = ${column} + ?`,
+    [today, value, value]
+  );
+}
+
 function registerSignalingHandlers(socket) {
   const userId = socket.userId;
 
@@ -27,6 +47,10 @@ function registerSignalingHandlers(socket) {
       socket.to(socketId).emit('call:offer', { from: userId, sdp, callType: data.callType || 'voice', callerName });
     }
     console.log(`[signaling] call:offer forwarded to ${to}`);
+
+    // Increment daily call stats
+    const callColumn = (data.callType === 'video') ? 'video_calls' : 'audio_calls';
+    incrementDailyStat(callColumn).catch(err => console.error('[stats] Failed to increment call stat:', err));
   });
 
   // call:answer
@@ -44,6 +68,10 @@ function registerSignalingHandlers(socket) {
         socket.to(socketId).emit('call:answer', { from: userId, sdp });
       }
       console.log(`[signaling] call:answer forwarded to ${to}`);
+
+      // Track call start time for duration calculation
+      const callKey = getCallKey(userId, to);
+      activeCalls.set(callKey, Date.now());
     } else {
       console.log(`[signaling] call:answer DROPPED: ${to} is offline`);
     }
@@ -83,6 +111,18 @@ function registerSignalingHandlers(socket) {
         socket.to(socketId).emit('call:hangup', { from: userId });
       }
     }
+
+    // Track call duration
+    const callKey = getCallKey(userId, to);
+    const startTime = activeCalls.get(callKey);
+    if (startTime) {
+      activeCalls.delete(callKey);
+      const durationSeconds = Math.round((Date.now() - startTime) / 1000);
+      if (durationSeconds > 0) {
+        incrementDailyStat('completed_calls').catch(err => console.error('[stats] Failed to increment completed_calls:', err));
+        incrementDailyStat('total_call_duration_seconds', durationSeconds).catch(err => console.error('[stats] Failed to increment call duration:', err));
+      }
+    }
   });
 
   // call:toggle-video
@@ -114,4 +154,19 @@ function registerSignalingHandlers(socket) {
   });
 }
 
-module.exports = { registerSignalingHandlers };
+function cleanupCallTracking(userId) {
+  for (const [key, startTime] of activeCalls) {
+    const parts = key.split(':');
+    if (parts.includes(userId)) {
+      // Record duration stats before deleting (treat disconnect as implicit hangup)
+      const durationSeconds = Math.round((Date.now() - startTime) / 1000);
+      if (durationSeconds > 0) {
+        incrementDailyStat('completed_calls').catch(err => console.error('[stats] Failed to increment completed_calls:', err));
+        incrementDailyStat('total_call_duration_seconds', durationSeconds).catch(err => console.error('[stats] Failed to increment call duration:', err));
+      }
+      activeCalls.delete(key);
+    }
+  }
+}
+
+module.exports = { registerSignalingHandlers, cleanupCallTracking };

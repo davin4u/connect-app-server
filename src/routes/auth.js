@@ -64,6 +64,14 @@ router.post('/register', async (req, res) => {
     [id, contactCode, displayName.trim(), publicKey, chatPublicKey]
   );
 
+  // Increment daily registration stats
+  const today = new Date().toISOString().slice(0, 10);
+  db.run(
+    `INSERT INTO daily_stats (date, registrations) VALUES (?, 1)
+     ON CONFLICT(date) DO UPDATE SET registrations = registrations + 1`,
+    [today]
+  ).catch(err => console.error('[stats] Failed to increment registrations:', err));
+
   res.status(201).json({
     id,
     contactCode,

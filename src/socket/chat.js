@@ -1,6 +1,10 @@
 const db = require('../db');
 const { getOnlineUsers } = require('./presence');
 
+function getToday() {
+  return new Date().toISOString().slice(0, 10);
+}
+
 function registerChatHandlers(socket) {
   const userId = socket.userId;
 
@@ -35,6 +39,14 @@ function registerChatHandlers(socket) {
     // Confirm to sender
     socket.emit('message:sent', { id, timestamp: ts });
     console.log(`[chat] message stored & confirmed. id=${id} to=${to}`);
+
+    // Increment daily message stats
+    const today = getToday();
+    db.run(
+      `INSERT INTO daily_stats (date, messages_sent) VALUES (?, 1)
+       ON CONFLICT(date) DO UPDATE SET messages_sent = messages_sent + 1`,
+      [today]
+    ).catch(err => console.error('[stats] Failed to increment messages_sent:', err));
 
     // Deliver to recipient if online
     const onlineUsers = getOnlineUsers();
