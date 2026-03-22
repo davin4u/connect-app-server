@@ -61,6 +61,19 @@ function hasAppSocket(userId) {
   return false;
 }
 
+function getConnectionCounts() {
+  let app = 0;
+  let service = 0;
+  for (const type of socketTypes.values()) {
+    if (type === 'service') {
+      service++;
+    } else {
+      app++;
+    }
+  }
+  return { app, service };
+}
+
 function addSocket(userId, socketId, socketType = 'app') {
   // Cancel any pending offline timer
   if (offlineTimers.has(userId)) {
@@ -123,6 +136,7 @@ module.exports = {
   getOnlineUsers,
   isUserOnline,
   hasAppSocket,
+  getConnectionCounts,
   getAcceptedContactIds,
   addSocket,
   removeSocket,

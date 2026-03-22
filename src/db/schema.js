@@ -57,6 +57,16 @@ function getCreateTableSQL(dbType) {
       code TEXT PRIMARY KEY,
       retired_at INTEGER NOT NULL DEFAULT (${nowDefault})
     );
+
+    CREATE TABLE IF NOT EXISTS daily_stats (
+      date TEXT PRIMARY KEY,
+      messages_sent INTEGER DEFAULT 0,
+      audio_calls INTEGER DEFAULT 0,
+      video_calls INTEGER DEFAULT 0,
+      completed_calls INTEGER DEFAULT 0,
+      total_call_duration_seconds INTEGER DEFAULT 0,
+      registrations INTEGER DEFAULT 0
+    );
   `;
 }
 

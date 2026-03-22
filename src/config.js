@@ -6,4 +6,5 @@ module.exports = {
   DB_PATH: process.env.DB_PATH || './data/messenger.db',  // sqlite only
   DATABASE_URL: process.env.DATABASE_URL || '',           // postgres only
   POW_DIFFICULTY: parseInt(process.env.POW_DIFFICULTY, 10) || 20,
+  ADMIN_SECRET: process.env.ADMIN_SECRET || '',
 };
