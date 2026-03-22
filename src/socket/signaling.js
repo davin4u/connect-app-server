@@ -1,4 +1,5 @@
 const { getOnlineUsers } = require('./presence');
+const db = require('../db');
 
 function registerSignalingHandlers(socket) {
   const userId = socket.userId;
@@ -18,8 +19,12 @@ function registerSignalingHandlers(socket) {
       return socket.emit('call:unavailable', {});
     }
 
+    // Look up caller's display name for incoming call notification
+    const caller = db.prepare('SELECT display_name FROM users WHERE id = ?').get(userId);
+    const callerName = caller ? caller.display_name : 'Unknown';
+
     for (const socketId of onlineUsers.get(to)) {
-      socket.to(socketId).emit('call:offer', { from: userId, sdp, callType: data.callType || 'voice' });
+      socket.to(socketId).emit('call:offer', { from: userId, sdp, callType: data.callType || 'voice', callerName });
     }
     console.log(`[signaling] call:offer forwarded to ${to}`);
   });

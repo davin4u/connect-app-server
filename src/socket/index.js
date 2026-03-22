@@ -2,7 +2,7 @@ const { Server } = require('socket.io');
 const nacl = require('tweetnacl');
 const { decodeBase64 } = require('tweetnacl-util');
 const db = require('../db');
-const { setIO, addSocket, removeSocket, isUserOnline, getAcceptedContactIds } = require('./presence');
+const { setIO, addSocket, removeSocket, isUserOnline, hasAppSocket, getAcceptedContactIds } = require('./presence');
 const { registerChatHandlers } = require('./chat');
 const { registerSignalingHandlers } = require('./signaling');
 const { registerContactHandlers } = require('./contacts');
@@ -54,56 +54,62 @@ function initSocketIO(httpServer) {
     }
 
     socket.userId = user.id;
+    socket.socketType = socket.handshake.auth.socketType || 'app';
     next();
   });
 
   io.on('connection', (socket) => {
     const userId = socket.userId;
-    console.log(`User connected: ${userId} (socket: ${socket.id})`);
+    const socketType = socket.socketType || 'app';
+    console.log(`User connected: ${userId} (socket: ${socket.id}, type: ${socketType})`);
 
     // Track presence
-    addSocket(userId, socket.id);
+    addSocket(userId, socket.id, socketType);
 
-    // Register event handlers
-    registerChatHandlers(socket);
+    // All sockets need signaling (call routing)
     registerSignalingHandlers(socket);
-    registerContactHandlers(socket);
 
-    // Send current online status of contacts
-    const contactIds = getAcceptedContactIds(userId);
-    for (const contactId of contactIds) {
-      if (isUserOnline(contactId)) {
-        socket.emit('presence:update', { userId: contactId, online: true });
+    // Only app sockets get chat/contact handlers and message delivery
+    if (socketType !== 'service') {
+      registerChatHandlers(socket);
+      registerContactHandlers(socket);
+
+      // Send current online status of contacts
+      const contactIds = getAcceptedContactIds(userId);
+      for (const contactId of contactIds) {
+        if (hasAppSocket(contactId)) {
+          socket.emit('presence:update', { userId: contactId, online: true });
+        }
       }
-    }
 
-    // Deliver unread messages
-    const undelivered = db.prepare(
-      'SELECT id, sender_id, ciphertext, nonce, timestamp FROM messages WHERE receiver_id = ? AND delivered = 0 ORDER BY timestamp ASC'
-    ).all(userId);
+      // Deliver unread messages
+      const undelivered = db.prepare(
+        'SELECT id, sender_id, ciphertext, nonce, timestamp FROM messages WHERE receiver_id = ? AND delivered = 0 ORDER BY timestamp ASC'
+      ).all(userId);
 
-    for (const msg of undelivered) {
-      socket.emit('message:receive', {
-        id: msg.id,
-        from: msg.sender_id,
-        ciphertext: msg.ciphertext,
-        nonce: msg.nonce,
-        timestamp: msg.timestamp,
-      });
-    }
+      for (const msg of undelivered) {
+        socket.emit('message:receive', {
+          id: msg.id,
+          from: msg.sender_id,
+          ciphertext: msg.ciphertext,
+          nonce: msg.nonce,
+          timestamp: msg.timestamp,
+        });
+      }
 
-    // Deliver pending events (e.g. message deletions while offline)
-    const pendingEvents = db.prepare(
-      'SELECT * FROM pending_events WHERE user_id = ? ORDER BY timestamp ASC'
-    ).all(userId);
+      // Deliver pending events (e.g. message deletions while offline)
+      const pendingEvents = db.prepare(
+        'SELECT * FROM pending_events WHERE user_id = ? ORDER BY timestamp ASC'
+      ).all(userId);
 
-    for (const event of pendingEvents) {
-      const payload = JSON.parse(event.payload);
-      socket.emit(event.event_type, payload);
-    }
+      for (const event of pendingEvents) {
+        const payload = JSON.parse(event.payload);
+        socket.emit(event.event_type, payload);
+      }
 
-    if (pendingEvents.length > 0) {
-      db.prepare('DELETE FROM pending_events WHERE user_id = ?').run(userId);
+      if (pendingEvents.length > 0) {
+        db.prepare('DELETE FROM pending_events WHERE user_id = ?').run(userId);
+      }
     }
 
     // Handle disconnect
