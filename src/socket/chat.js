@@ -44,7 +44,7 @@ function registerChatHandlers(socket) {
     const today = getToday();
     db.run(
       `INSERT INTO daily_stats (date, messages_sent) VALUES (?, 1)
-       ON CONFLICT(date) DO UPDATE SET messages_sent = messages_sent + 1`,
+       ON CONFLICT(date) DO UPDATE SET messages_sent = daily_stats.messages_sent + 1`,
       [today]
     ).catch(err => console.error('[stats] Failed to increment messages_sent:', err));
 

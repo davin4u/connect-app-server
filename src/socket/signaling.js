@@ -16,7 +16,7 @@ async function incrementDailyStat(column, value = 1) {
   const today = getToday();
   await db.run(
     `INSERT INTO daily_stats (date, ${column}) VALUES (?, ?)
-     ON CONFLICT(date) DO UPDATE SET ${column} = ${column} + ?`,
+     ON CONFLICT(date) DO UPDATE SET ${column} = daily_stats.${column} + ?`,
     [today, value, value]
   );
 }

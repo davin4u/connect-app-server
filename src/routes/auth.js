@@ -68,7 +68,7 @@ router.post('/register', async (req, res) => {
   const today = new Date().toISOString().slice(0, 10);
   db.run(
     `INSERT INTO daily_stats (date, registrations) VALUES (?, 1)
-     ON CONFLICT(date) DO UPDATE SET registrations = registrations + 1`,
+     ON CONFLICT(date) DO UPDATE SET registrations = daily_stats.registrations + 1`,
     [today]
   ).catch(err => console.error('[stats] Failed to increment registrations:', err));
 
