@@ -61,6 +61,16 @@ function hasAppSocket(userId) {
   return false;
 }
 
+function getUserSocketCounts(userId) {
+  if (!onlineUsers.has(userId)) return { app: 0, service: 0 };
+  let app = 0, service = 0;
+  for (const socketId of onlineUsers.get(userId)) {
+    if (socketTypes.get(socketId) === 'service') service++;
+    else app++;
+  }
+  return { app, service };
+}
+
 function getConnectionCounts() {
   let app = 0;
   let service = 0;
@@ -119,6 +129,8 @@ function removeSocket(userId, socketId) {
   } else if (socketType !== 'service') {
     // An app socket disconnected — check if any app sockets remain
     if (!hasAppSocket(userId)) {
+      const remainingService = onlineUsers.get(userId).size;
+      console.log(`[presence] ${userId} lost all app sockets, ${remainingService} service sockets remain — will appear online but can't handle calls`);
       const timer = setTimeout(() => {
         offlineTimers.delete(userId);
         if (!hasAppSocket(userId)) {
@@ -136,6 +148,7 @@ module.exports = {
   getOnlineUsers,
   isUserOnline,
   hasAppSocket,
+  getUserSocketCounts,
   getConnectionCounts,
   getAcceptedContactIds,
   addSocket,
