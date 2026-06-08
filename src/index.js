@@ -54,11 +54,18 @@ async function start() {
     message: { error: 'Too many admin requests, try again later' },
   });
 
+  const inviteValidateLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: 10,
+    message: { error: 'Too many invite checks, try again later' },
+  });
+
   // Routes
   app.use('/api/pow/challenge', powChallengeLimiter);
   app.use('/api/register', registerLimiter);
   app.use('/api/recover', recoverLimiter);
   app.use('/api/generate-name', generateNameLimiter);
+  app.use('/api/invite/validate', inviteValidateLimiter);
   app.use('/api', authRoutes);
   app.use('/api/contacts', contactsRoutes);
   app.use('/api/admin', adminLimiter);

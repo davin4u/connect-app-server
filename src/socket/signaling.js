@@ -1,6 +1,14 @@
 const { getOnlineUsers, hasAppSocket, getUserSocketCounts } = require('./presence');
 const db = require('../db');
 
+async function enqueueMissedCall(from, to, callType) {
+  const { v4: uuid } = require('uuid');
+  await db.run(
+    'INSERT INTO pending_events (id, user_id, event_type, payload, timestamp) VALUES (?, ?, ?, ?, ?)',
+    [uuid(), to, 'call:missed', JSON.stringify({ from, callType: callType || 'voice', timestamp: Math.floor(Date.now() / 1000) }), Math.floor(Date.now() / 1000)]
+  );
+}
+
 // Map<callKey, startTime> for tracking call duration (stats)
 const activeCalls = new Map();
 
@@ -88,11 +96,13 @@ function registerSignalingHandlers(socket) {
 
     if (!onlineUsers.has(to)) {
       console.log(`[signaling] call:unavailable sent to ${userId}: ${to} is completely offline`);
+      enqueueMissedCall(userId, to, data.callType).catch(err => console.error('[signaling] missed-call enqueue failed:', err));
       return socket.emit('call:unavailable', {});
     }
 
     if (!hasAppSocket(to)) {
       console.log(`[signaling] call:unavailable sent to ${userId}: ${to} has 0 app sockets, ${targetCounts.service} service sockets`);
+      enqueueMissedCall(userId, to, data.callType).catch(err => console.error('[signaling] missed-call enqueue failed:', err));
       return socket.emit('call:unavailable', {});
     }
 

@@ -17,6 +17,8 @@ function getCreateTableSQL(dbType) {
       display_name TEXT NOT NULL,
       public_key TEXT NOT NULL,
       chat_public_key TEXT,
+      invitation_code TEXT,
+      invitation_code_usages INTEGER NOT NULL DEFAULT 3,
       username TEXT,
       password_hash TEXT,
       created_at INTEGER NOT NULL DEFAULT (${nowDefault})
@@ -77,6 +79,7 @@ function getCreateIndexesSQL() {
     CREATE UNIQUE INDEX IF NOT EXISTS idx_users_chat_public_key ON users(chat_public_key);
     CREATE INDEX IF NOT EXISTS idx_messages_receiver_delivered ON messages(receiver_id, delivered);
     CREATE INDEX IF NOT EXISTS idx_pending_events_user ON pending_events(user_id);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_users_invitation_code ON users(invitation_code);
   `;
 }
 
@@ -119,6 +122,38 @@ async function runSqliteMigrations(driver) {
       PRAGMA foreign_keys = ON;
     `);
     console.log('[migration] Made username and password_hash columns nullable');
+  }
+
+  // Migration: add invitation_code + invitation_code_usages columns
+  if (!driver.hasColumn('users', 'invitation_code')) {
+    await driver.exec('ALTER TABLE users ADD COLUMN invitation_code TEXT');
+    console.log('[migration] Added invitation_code column');
+  }
+  if (!driver.hasColumn('users', 'invitation_code_usages')) {
+    await driver.exec('ALTER TABLE users ADD COLUMN invitation_code_usages INTEGER NOT NULL DEFAULT 3');
+    console.log('[migration] Added invitation_code_usages column');
+  }
+
+  // Backfill invitation codes for any user missing one
+  const CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  const randCode = () => {
+    const bytes = require('crypto').randomBytes(8);
+    let c = '';
+    for (let i = 0; i < 8; i++) c += CHARS[bytes[i] % CHARS.length];
+    return c.slice(0, 4) + '-' + c.slice(4);
+  };
+  const missing = await driver.all('SELECT id FROM users WHERE invitation_code IS NULL', []);
+  for (const u of missing) {
+    let code = null;
+    for (let attempt = 0; attempt < 10; attempt++) {
+      const candidate = randCode();
+      const exists = await driver.get('SELECT 1 FROM users WHERE invitation_code = ?', [candidate]);
+      if (!exists) { code = candidate; break; }
+    }
+    if (code) {
+      await driver.run('UPDATE users SET invitation_code = ?, invitation_code_usages = 3 WHERE id = ?', [code, u.id]);
+      console.log(`[migration] Backfilled invitation_code for user ${u.id}`);
+    }
   }
 }
 

@@ -1,7 +1,7 @@
 const express = require('express');
 const { v4: uuidv4 } = require('uuid');
 const db = require('../db');
-const { generateContactCode } = require('../utils/contactCode');
+const { generateContactCode, generateInvitationCode } = require('../utils/contactCode');
 const { generateChallenge, verifyPow } = require('../utils/pow');
 const { generateDisplayName } = require('../utils/nameGenerator');
 
@@ -20,7 +20,7 @@ router.post('/pow/challenge', (req, res) => {
 
 // POST /api/register — create account with PoW proof
 router.post('/register', async (req, res) => {
-  const { challenge, nonce, publicKey, chatPublicKey, displayName } = req.body;
+  const { challenge, nonce, publicKey, chatPublicKey, displayName, invitationCode } = req.body;
 
   // Validate required fields
   if (!challenge || typeof challenge !== 'string') {
@@ -37,6 +37,11 @@ router.post('/register', async (req, res) => {
   }
   if (!displayName || typeof displayName !== 'string' || displayName.trim().length < 1 || displayName.trim().length > 50) {
     return res.status(400).json({ error: 'Display name must be 1-50 characters' });
+  }
+
+  const invite = (typeof invitationCode === 'string' ? invitationCode : '').trim().toUpperCase();
+  if (!invite) {
+    return res.status(400).json({ error: 'Invitation code is required' });
   }
 
   // Verify PoW
@@ -58,11 +63,33 @@ router.post('/register', async (req, res) => {
 
   const id = uuidv4();
   const contactCode = await generateContactCode();
+  const ownInvitationCode = await generateInvitationCode();
 
-  await db.run(
-    'INSERT INTO users (id, contact_code, display_name, public_key, chat_public_key) VALUES (?, ?, ?, ?, ?)',
-    [id, contactCode, displayName.trim(), publicKey, chatPublicKey]
+  // Atomically consume one invite use (race-safe: guarded by > 0)
+  const consumed = await db.run(
+    `UPDATE users SET invitation_code_usages = invitation_code_usages - 1
+     WHERE invitation_code = ? AND invitation_code_usages > 0`,
+    [invite]
   );
+  if (consumed.changes === 0) {
+    return res.status(400).json({ error: 'Invalid or exhausted invitation code' });
+  }
+
+  try {
+    await db.run(
+      `INSERT INTO users (id, contact_code, display_name, public_key, chat_public_key, invitation_code, invitation_code_usages)
+       VALUES (?, ?, ?, ?, ?, ?, 3)`,
+      [id, contactCode, displayName.trim(), publicKey, chatPublicKey, ownInvitationCode]
+    );
+  } catch (e) {
+    // Roll back the consumed invite so a failed insert does not burn it
+    await db.run(
+      'UPDATE users SET invitation_code_usages = invitation_code_usages + 1 WHERE invitation_code = ?',
+      [invite]
+    );
+    console.error('[register] insert failed, invite refunded:', e.message);
+    return res.status(500).json({ error: 'Registration failed' });
+  }
 
   // Increment daily registration stats
   const today = new Date().toISOString().slice(0, 10);
@@ -76,6 +103,8 @@ router.post('/register', async (req, res) => {
     id,
     contactCode,
     displayName: displayName.trim(),
+    invitationCode: ownInvitationCode,
+    invitationCodeUsages: 3,
   });
 });
 
@@ -88,7 +117,7 @@ router.post('/recover', async (req, res) => {
   }
 
   const user = await db.get(
-    'SELECT id, contact_code, display_name, public_key, chat_public_key FROM users WHERE public_key = ?',
+    'SELECT id, contact_code, display_name, public_key, chat_public_key, invitation_code, invitation_code_usages FROM users WHERE public_key = ?',
     [publicKey]
   );
 
@@ -115,6 +144,8 @@ router.post('/recover', async (req, res) => {
     displayName: user.display_name,
     publicKey: user.public_key,
     chatPublicKey: user.chat_public_key,
+    invitationCode: user.invitation_code,
+    invitationCodeUsages: user.invitation_code_usages,
     contacts: contacts.map(c => ({
       id: c.id,
       contactCode: c.contact_code,
@@ -133,6 +164,19 @@ router.post('/generate-name', async (_req, res) => {
   } catch (e) {
     res.status(500).json({ error: 'Failed to generate name' });
   }
+});
+
+// POST /api/invite/validate — check an invitation code without consuming it
+router.post('/invite/validate', async (req, res) => {
+  const code = (typeof req.body.invitationCode === 'string' ? req.body.invitationCode : '').trim().toUpperCase();
+  if (!code) {
+    return res.json({ valid: false });
+  }
+  const row = await db.get(
+    'SELECT 1 FROM users WHERE invitation_code = ? AND invitation_code_usages > 0',
+    [code]
+  );
+  res.json({ valid: !!row });
 });
 
 module.exports = router;
